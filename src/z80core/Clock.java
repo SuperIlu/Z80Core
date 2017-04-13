@@ -13,9 +13,11 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public class Clock {
 	private static final Clock instance = new Clock();
+
 	private long tstates;
 	private long frames;
 	private long timeout;
+
 	private final CopyOnWriteArrayList<ClockTimeoutListener> clockListeners;
 
 	// Clock class implements a Singleton pattern.

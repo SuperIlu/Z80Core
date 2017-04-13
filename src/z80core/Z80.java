@@ -14,12 +14,12 @@
  *
  * Notas:   09/01/2008 pasa los 68 tests de ZEXALL, con lo que se supone
  *          que realiza una implementación correcta de la Z80.
- * 
+ *
  *          14/01/2008 pasa también los tests de fuse 0.10, exceptuando
  *          los que fuse no implementa bien (BIT n,(HL)).
  *          Del resto, cumple con los contenidos de los registros, flags,
  *          y t-estados.
- * 
+ *
  *          15/01/2008 faltaban los flags de las instrucciones IN r,(C).
  *
  *          03/12/2008 se descomponen las instrucciones para poder
@@ -67,32 +67,32 @@
  *          corregir la instrucción LD SP, IX(IY) que realizaba los 2 estados de
  *          contención sobre PC en lugar de sobre IR que es lo correcto. De paso
  *          he verificado que todos los usos de getRegIR() son correctos.
- * 
+ *
  *          29/05/2011 Corregida la inicialización de los registros dependiendo
  *          de si es por un reset a través de dicho pin o si es por inicio de
  *          alimentación al chip.
- * 
+ *
  *          04/06/2011 Creados los métodos de acceso al registro oculto MEMPTR
  *          para que puedar cargarse/guardarse en los snapshots de tipo SZX.
- * 
+ *
  *          06/06/2011 Pequeñas optimizaciones en LDI/LDD y CPI/CPD. Se eliminan
  *          los métodos set/reset porque, al no afectar a los flags, es más
  *          rápido aplicar la operación lógica con la máscara donde proceda que
  *          llamar a un método pasándole dos parámetros. Se elimina también el
  *          método EXX y su código se pone en el switch principal.
- * 
+ *
  *          07/06/2011 En las instrucciones INC/DEC (HL) el estado adicional
  *          estaba mal puesto, ya que va después del read y no antes. Corregido.
- * 
+ *
  *          04/07/2011 Se elimina el método push añadido el 28/03/2010 y se usa
  *          el que queda en todos los casos. El código de RETI se unifica con
  *          RETN y sus códigos duplicados. Ligeras modificaciones en DJNZ y en
  *          LDI/LDD/CPI/CPD. Se optimiza el tratamiento del registro MEMPTR.
- * 
+ *
  *          11/07/2011 Se optimiza el tratamiento del carryFlag en las instrucciones
  *          SUB/SBC/SBC16/CP. Se optimiza el tratamiento del HalfCarry en las
  *          instruciones ADC/ADC16/SBC/SBC16.
- * 
+ *
  *          25/09/2011 Introducidos los métodos get/setTimeout. De esa forma,
  *          además de recibir una notificación después de cada instrucción ejecutada
  *          se puede recibir tras N ciclos. En cualquier caso, execDone será llamada
@@ -100,31 +100,31 @@
  *          expirar el timeout programado. Si hay un timeout, éste seguirá vigente
  *          hasta que se programe otro o se ponga a false execDone. Si el timeout
  *          se programa a cero, se llamará a execDone tras cada instrucción.
- * 
+ *
  *          08/10/2011 En los métodos xor, or y cp se aseguran de que valores > 0xff
  *          pasados como parámetro no le afecten.
- * 
+ *
  *          11/10/2011 Introducida la nueva funcionalidad que permite definir
  *          breakpoints. Cuando se va a ejecutar el opcode que está en esa dirección
  *          se llama al método atAddress. Se separan en dos interfaces las llamadas a
  *          los accesos a memoria de las llamadas de notificación.
- * 
+ *
  *          13/10/2011 Corregido un error en la emulación de las instrucciones
  *          DD/FD que no van seguidas de un código de instrucción adecuado a IX o IY.
  *          Tal y como se trataban hasta ahora, se comprobaban las interrupciones entre
  *          el/los códigos DD/FD y el código de instrucción que le seguía.
- * 
+ *
  *          02/12/2011 Creados los métodos necesarios para poder grabar y cargar el
  *          estado de la CPU de una sola vez a través de la clase Z80State. Los modos
  *          de interrupción pasan a estar en una enumeración. Se proporcionan métodos de
  *          acceso a los registros alternativos de 8 bits.
- * 
+ *
  *          03/06/2012 Eliminada la adición del 25/09/2011. El núcleo de la Z80 no tiene
  *          que preocuparse por timeouts ni zarandajas semejantes. Eso ahora es
  *          responsabilidad de la clase Clock. Se mantiene la funcionalidad del execDone
  *          por si fuera necesario en algún momento avisar tras cada ejecución de
  *          instrucción (para un depurador, por ejemplo).
- * 
+ *
  *          10/12/2012 Actualizada la emulación con las últimas investigaciones llevadas a
  *          cabo por Patrik Rak, respecto al comportamiento de los bits 3 y 5 del registro F
  *          en las instrucciones CCF/SCF. Otro de los tests de Patrik demuestra que, además,
@@ -204,15 +204,16 @@ public class Z80 {
 	private boolean pendingEI = false;
 	// Estado de la línea NMI
 	private boolean activeNMI = false;
+
 	// Si está activa la línea INT
 	// En el 48 y los +2a/+3 la línea INT se activa durante 32 ciclos de reloj
 	// En el 128 y +2, se activa 36 ciclos de reloj
-	private boolean activeINT = false;
+	private int activeINT = -1;
 
 	// Modos de interrupción
 	public enum IntMode {
 		IM0, IM1, IM2
-	};
+	}
 
 	// Modo de interrupción
 	private IntMode modeINT = IntMode.IM0;
@@ -220,6 +221,7 @@ public class Z80 {
 	private boolean halted = false;
 	// pinReset == true, se ha producido un reset a través de la patilla
 	private boolean pinReset = false;
+
 	/*
 	 * Registro interno que usa la CPU de la siguiente forma
 	 *
@@ -254,7 +256,6 @@ public class Z80 {
 	private static final int sz53pn_addTable[] = new int[256];
 	private static final int sz53n_subTable[] = new int[256];
 	private static final int sz53pn_subTable[] = new int[256];
-
 	static {
 		boolean evenBits;
 
@@ -287,7 +288,6 @@ public class Z80 {
 		sz53n_subTable[0] |= ZERO_MASK;
 		sz53pn_subTable[0] |= ZERO_MASK;
 	}
-
 	// Un true en una dirección indica que se debe notificar que se va a
 	// ejecutar la instrucción que está en esa direción.
 	private final boolean breakpointAt[] = new boolean[65536];
@@ -690,7 +690,7 @@ public class Z80 {
 		return (sz5h3pnFlags & BIT3_MASK) != 0;
 	}
 
-	public final void setBit3Fag(boolean state) {
+	public final void setBit3Flag(boolean state) {
 		if (state) {
 			sz5h3pnFlags |= BIT3_MASK;
 		} else {
@@ -787,12 +787,17 @@ public class Z80 {
 		activeNMI = true;
 	}
 
+	// La línea de NMI se activa por impulso, no por nivel
+	public final void triggerINT(int vector) {
+		activeINT = vector;
+	}
+
 	// La línea INT se activa por nivel
-	public final boolean isINTLine() {
+	public final int isINTLine() {
 		return activeINT;
 	}
 
-	public final void setINTLine(boolean intLine) {
+	public final void setINTLine(int intLine) {
 		activeINT = intLine;
 	}
 
@@ -939,7 +944,7 @@ public class Z80 {
 		ffIFF2 = false;
 		pendingEI = false;
 		activeNMI = false;
-		activeINT = false;
+		activeINT = -1;
 		halted = false;
 		setIM(IntMode.IM0);
 		lastFlagQ = false;
@@ -1317,7 +1322,7 @@ public class Z80 {
 		int suma = 0;
 		boolean carry = carryFlag;
 
-		if ((sz5h3pnFlags & HALFCARRY_MASK) != 0 || (regA & 0x0f) > 0x09) {
+		if (((sz5h3pnFlags & HALFCARRY_MASK) != 0) || ((regA & 0x0f) > 0x09)) {
 			suma = 6;
 		}
 
@@ -1375,7 +1380,7 @@ public class Z80 {
 			sz5h3pnFlags |= BIT5_MASK;
 		}
 
-		if (regC != 0 || regB != 0) {
+		if ((regC != 0) || (regB != 0)) {
 			sz5h3pnFlags |= PARITY_MASK;
 		}
 		flagQ = true;
@@ -1398,7 +1403,7 @@ public class Z80 {
 			sz5h3pnFlags |= BIT5_MASK;
 		}
 
-		if (regC != 0 || regB != 0) {
+		if ((regC != 0) || (regB != 0)) {
 			sz5h3pnFlags |= PARITY_MASK;
 		}
 		flagQ = true;
@@ -1421,7 +1426,7 @@ public class Z80 {
 			sz5h3pnFlags |= BIT5_MASK;
 		}
 
-		if (regC != 0 || regB != 0) {
+		if ((regC != 0) || (regB != 0)) {
 			sz5h3pnFlags |= PARITY_MASK;
 		}
 
@@ -1446,7 +1451,7 @@ public class Z80 {
 			sz5h3pnFlags |= BIT5_MASK;
 		}
 
-		if (regC != 0 || regB != 0) {
+		if ((regC != 0) || (regB != 0)) {
 			sz5h3pnFlags |= PARITY_MASK;
 		}
 
@@ -1597,13 +1602,13 @@ public class Z80 {
 	private void bit(int mask, int reg) {
 		boolean zeroFlag = (mask & reg) == 0;
 
-		sz5h3pnFlags = sz53n_addTable[reg] & ~FLAG_SZP_MASK | HALFCARRY_MASK;
+		sz5h3pnFlags = (sz53n_addTable[reg] & ~FLAG_SZP_MASK) | HALFCARRY_MASK;
 
 		if (zeroFlag) {
 			sz5h3pnFlags |= (PARITY_MASK | ZERO_MASK);
 		}
 
-		if (mask == SIGN_MASK && !zeroFlag) {
+		if ((mask == SIGN_MASK) && !zeroFlag) {
 			sz5h3pnFlags |= SIGN_MASK;
 		}
 		flagQ = true;
@@ -1637,7 +1642,7 @@ public class Z80 {
 		ffIFF1 = ffIFF2 = false;
 		push(regPC); // el push a�adir� 6 t-estados (+contended si toca)
 		if (modeINT == IntMode.IM2) {
-			regPC = Z80opsImpl.peek16((regI << 8) | 0xff); // +6 t-estados
+			regPC = Z80opsImpl.peek16((regI << 8) | (0xff & activeINT)); // +6
 		} else {
 			regPC = 0x0038;
 		}
@@ -1689,10 +1694,11 @@ public class Z80 {
 
 		// Ahora se comprueba si al final de la instrucción anterior se
 		// encontró una interrupción enmascarable y, de ser así, se procesa.
-		if (activeINT) {
+		if (activeINT > 0) {
 			if (ffIFF1 && !pendingEI) {
 				lastFlagQ = false;
 				interruption();
+				activeINT = -1;
 			}
 		}
 
@@ -1712,7 +1718,7 @@ public class Z80 {
 
 		// Si está pendiente la activación de la interrupciones y el
 		// código que se acaba de ejecutar no es el propio EI
-		if (pendingEI && opCode != 0xFB) {
+		if (pendingEI && (opCode != 0xFB)) {
 			pendingEI = false;
 		}
 
@@ -1730,49 +1736,6 @@ public class Z80 {
 
 		while (clock.getTstates() < statesLimit) {
 			execute();
-			// // Primero se comprueba NMI
-			// if (activeNMI) {
-			// activeNMI = false;
-			// lastFlagQ = false;
-			// nmi();
-			// continue;
-			// }
-			//
-			// // Ahora se comprueba si al final de la instrucción anterior se
-			// // encontró una interrupción enmascarable y, de ser así, se
-			// procesa.
-			// if (activeINT) {
-			// if (ffIFF1 && !pendingEI) {
-			// lastFlagQ = false;
-			// interruption();
-			// }
-			// }
-			//
-			// regR++;
-			// opCode = MemIoImpl.fetchOpcode(regPC);
-			//
-			// if (breakpointAt[regPC]) {
-			// opCode = NotifyImpl.atAddress(regPC, opCode);
-			// }
-			//
-			// regPC = (regPC + 1) & 0xffff;
-			//
-			// flagQ = false;
-			//
-			// decodeOpcode(opCode);
-			//
-			// lastFlagQ = flagQ;
-			//
-			// // Si está pendiente la activación de la interrupciones y el
-			// // código que se acaba de ejecutar no es el propio EI
-			// if (pendingEI && opCode != 0xFB) {
-			// pendingEI = false;
-			// }
-			//
-			// if (execDone) {
-			// NotifyImpl.execDone();
-			// }
-
 		} /* del while */
 	}
 
@@ -6331,7 +6294,7 @@ public class Z80 {
 		}
 		case 0xB1: { /* CPIR */
 			cpi();
-			if ((sz5h3pnFlags & PARITY_MASK) == PARITY_MASK && (sz5h3pnFlags & ZERO_MASK) == 0) {
+			if (((sz5h3pnFlags & PARITY_MASK) == PARITY_MASK) && ((sz5h3pnFlags & ZERO_MASK) == 0)) {
 				regPC = (regPC - 2) & 0xffff;
 				memptr = regPC + 1;
 				Z80opsImpl.contendedStates((getRegHL() - 1) & 0xffff, 5);
@@ -6365,7 +6328,7 @@ public class Z80 {
 		}
 		case 0xB9: { /* CPDR */
 			cpd();
-			if ((sz5h3pnFlags & PARITY_MASK) == PARITY_MASK && (sz5h3pnFlags & ZERO_MASK) == 0) {
+			if (((sz5h3pnFlags & PARITY_MASK) == PARITY_MASK) && ((sz5h3pnFlags & ZERO_MASK) == 0)) {
 				regPC = (regPC - 2) & 0xffff;
 				memptr = regPC + 1;
 				Z80opsImpl.contendedStates((getRegHL() + 1) & 0xffff, 5);

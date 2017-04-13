@@ -46,7 +46,7 @@ public class Z80State {
 	// Si está activa la línea INT
 	// En el 48 la línea INT se activa durante 32 ciclos de reloj
 	// En el 128 y superiores, se activa 36 ciclos de reloj
-	private boolean activeINT = false;
+	private int activeINT = -1;
 	// Modos de interrupción
 	private IntMode modeINT = IntMode.IM0;
 	// halted == true cuando la CPU está ejecutando un HALT (28/03/2010)
@@ -366,11 +366,11 @@ public class Z80State {
 	}
 
 	// La línea INT se activa por nivel
-	public final boolean isINTLine() {
+	public final int isINTLine() {
 		return activeINT;
 	}
 
-	public final void setINTLine(boolean intLine) {
+	public final void setINTLine(int intLine) {
 		activeINT = intLine;
 	}
 
