@@ -9,5 +9,5 @@ package z80core;
  * @author jsanchez
  */
 public interface ClockTimeoutListener {
-    public void clockTimeout();
+	public void clockTimeout();
 }
